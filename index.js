@@ -62,43 +62,80 @@ async function run() {
 
 
 
-        
+
         // ---------------------- Task APIs ----------------------
 
         // Fetch Tasks by User Email
         app.get("/tasks/:email", async (req, res) => {
             const email = req.params.email;
-            const tasks = await taskCollection.find({ userEmail: email }).toArray();
-            res.json(tasks);
+            const userTasks = await taskCollection.findOne({ userEmail: email });
+        
+            if (!userTasks) {
+                return res.status(404).json({ message: "No tasks found" });
+            }
+            res.send(userTasks.tasks);
+        });
+        
+
+
+
+        // Add or Update Task
+        app.post("/tasks", async (req, res) => {
+            const { userEmail, task } = req.body;
+
+            if (!userEmail || !task) {
+                return res.status(400).json({ message: "User email and task data are required" });
+            }
+
+            const existingUserTasks = await taskCollection.findOne({ userEmail });
+
+            if (existingUserTasks) {
+                // Update: Push new task into existing array
+                const result = await taskCollection.updateOne(
+                    { userEmail },
+                    { $push: { tasks: task } }
+                );
+                return res.status(200).json({ message: "Task added", result });
+            } else {
+                // Create new record for user
+                const newTaskDocument = {
+                    userEmail,
+                    tasks: [task],
+                };
+                const result = await taskCollection.insertOne(newTaskDocument);
+                return res.status(201).json({ message: "New task list created", result });
+            }
         });
 
-        // Add a New Task
-        app.post("/tasks", async (req, res) => {
-            const task = req.body;
-            if (!task.userEmail) {
-                return res.status(400).json({ message: "User email is required" });
-            }
-            const result = await taskCollection.insertOne(task);
-            res.status(201).json(result);
-        });
 
         // Update Task
-        app.patch("/tasks/:id", async (req, res) => {
-            const taskId = req.params.id;
+        app.patch("/tasks/:email/:taskId", async (req, res) => {
+            const { email, taskId } = req.params;
             const updatedTask = req.body;
+        
             const result = await taskCollection.updateOne(
-                { _id: new ObjectId(taskId) },
-                { $set: updatedTask }
+                { userEmail: email, "tasks.id": taskId },
+                { $set: { "tasks.$": updatedTask } }
             );
-            res.json(result);
+        
+            res.json({ message: "Task updated", result });
         });
 
+        
+
         // Delete Task
-        app.delete("/tasks/:id", async (req, res) => {
-            const taskId = req.params.id;
-            const result = await taskCollection.deleteOne({ _id: new ObjectId(taskId) });
-            res.json(result);
+        app.delete("/tasks/:email/:taskId", async (req, res) => {
+            const { email, taskId } = req.params;
+        
+            const result = await taskCollection.updateOne(
+                { userEmail: email },
+                { $pull: { tasks: { id: taskId } } }
+            );
+        
+            res.json({ message: "Task deleted", result });
         });
+
+
 
     } catch (error) {
         console.error("Error:", error);
