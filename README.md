@@ -1,8 +1,5 @@
 ## TaskMaster : Task Management App's Backend
 
-```md
-# TaskMaster - Task Management App (Backend)
-
 TaskMaster backend is a RESTful API built with Node.js and Express.js, using MongoDB for data storage.
 
 ## 🌍 Live API
