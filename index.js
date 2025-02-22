@@ -53,6 +53,29 @@ async function run() {
             }
         });
 
+        // Login User and update login time
+        app.patch("/users/:email", async (req, res) => {
+            const email = req.params.email;
+            try {
+                const result = await userCollection.updateOne(
+                    { email }, // Filter
+                    { $set: { lastLogin: new Date() } } // Update using $set
+                );
+                if (result.matchedCount === 0) {
+                    return res.status(404).json({ message: "User not found" });
+                }
+
+                const user = await userCollection.findOne({ email })
+                res.status(200).json({
+                    message: "User login time updated successfully",
+                    result,
+                    user
+                });
+            } catch (error) {
+                res.status(500).json({ message: "Error updating user", error: error.message });
+            }
+        });
+
         // Get User's Data
         app.get('/users/:email', async (req, res) => {
             const email = req.params.email;
@@ -107,6 +130,23 @@ async function run() {
             }
         });
 
+
+        // Modify tasks order
+        app.put("/tasks/:email", async (req, res) => {
+            const { email } = req.params;
+            const { tasks } = req.body;
+          
+            try {
+              const result = await taskCollection.updateOne(
+                { userEmail: email },
+                { $set: { tasks } },
+                { upsert: true }
+              );
+              res.status(200).json({ message: "Tasks updated successfully", result });
+            } catch (error) {
+              res.status(500).json({ message: "Error updating tasks", error });
+            }
+          });
 
         // Update Task
         app.patch("/tasks/:email/:taskId", async (req, res) => {
