@@ -2,13 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const http = require('http');
-const { Server } = require('socket.io');
 
 const app = express();
 const port = process.env.PORT || 5000;
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
 
 // Middleware
 app.use(cors());
@@ -30,18 +26,6 @@ async function run() {
         const taskCollection = database.collection('Tasks');
 
         console.log("Connected to MongoDB!");
-
-        // WebSocket connection
-        io.on('connection', (socket) => {
-            console.log("A user connected");
-            socket.on('disconnect', () => console.log("A user disconnected"));
-        });
-
-        // Listen for task changes
-        const changeStream = taskCollection.watch();
-        changeStream.on('change', (change) => {
-            io.emit('taskUpdate', change);
-        });
 
         // ---------------- User Related APIs ----------------
 
@@ -76,43 +60,51 @@ async function run() {
             res.send(result);
         });
 
-        // ---------------- Task Related APIs ----------------
 
-        // Add Task
-        app.post("/tasks", async (req, res) => {
-            const task = req.body;
-            if (!task.userEmail) return res.status(400).json({ message: "User email is required" });
-            const result = await taskCollection.insertOne(task);
-            res.send(result);
+
+        
+        // ---------------------- Task APIs ----------------------
+
+        // Fetch Tasks by User Email
+        app.get("/tasks/:email", async (req, res) => {
+            const email = req.params.email;
+            const tasks = await taskCollection.find({ userEmail: email }).toArray();
+            res.json(tasks);
         });
 
-        // Get Tasks for a Specific User
-        app.get('/tasks/:email', async (req, res) => {
-            const email = req.params.email;
-            const result = await taskCollection.find({ userEmail: email }).toArray();
-            res.send(result);
+        // Add a New Task
+        app.post("/tasks", async (req, res) => {
+            const task = req.body;
+            if (!task.userEmail) {
+                return res.status(400).json({ message: "User email is required" });
+            }
+            const result = await taskCollection.insertOne(task);
+            res.status(201).json(result);
         });
 
         // Update Task
-        app.patch('/tasks/:id', async (req, res) => {
+        app.patch("/tasks/:id", async (req, res) => {
             const taskId = req.params.id;
             const updatedTask = req.body;
-            const result = await taskCollection.updateOne({ _id: new ObjectId(taskId) }, { $set: updatedTask });
-            res.send(result);
+            const result = await taskCollection.updateOne(
+                { _id: new ObjectId(taskId) },
+                { $set: updatedTask }
+            );
+            res.json(result);
         });
 
         // Delete Task
-        app.delete('/tasks/:id', async (req, res) => {
+        app.delete("/tasks/:id", async (req, res) => {
             const taskId = req.params.id;
             const result = await taskCollection.deleteOne({ _id: new ObjectId(taskId) });
-            res.send(result);
+            res.json(result);
         });
 
     } catch (error) {
-        console.error("Error: ", error);
+        console.error("Error:", error);
     }
 }
 run().catch(console.dir);
 
 app.get('/', (req, res) => res.send("TaskMaster Backend Running..."));
-server.listen(port, () => console.log('Server running on port:', port));
+app.listen(port, () => console.log('Server running on port:', port));
