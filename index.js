@@ -1,23 +1,20 @@
-require('dotenv').config()
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const port = process.env.PORT || 5000
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const http = require('http');
+const { Server } = require('socket.io');
+
 const app = express();
+const port = process.env.PORT || 5000;
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
-// middleware
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-app.use(cors())
-app.use(express.json())
-
-
-
-
-
-
-const { MongoClient, ServerApiVersion } = require('mongodb');
 const uri = process.env.DB_URI;
-
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
     serverApi: {
         version: ServerApiVersion.v1,
@@ -28,119 +25,94 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-        // Connect the client to the server	(optional starting in v4.7)
-        // await client.connect();
-
         const database = client.db('TaskMaster');
         const userCollection = database.collection('Users');
+        const taskCollection = database.collection('Tasks');
 
+        console.log("Connected to MongoDB!");
 
+        // WebSocket connection
+        io.on('connection', (socket) => {
+            console.log("A user connected");
+            socket.on('disconnect', () => console.log("A user disconnected"));
+        });
 
+        // Listen for task changes
+        const changeStream = taskCollection.watch();
+        changeStream.on('change', (change) => {
+            io.emit('taskUpdate', change);
+        });
 
+        // ---------------- User Related APIs ----------------
 
-        // ------------------------APIs-----------------------
-
-
-        // -------------- User Related APIs -----------------------------
-
-        // API to Save User Data
+        // Save or Update User Data
         app.post('/users', async (req, res) => {
             const { email, displayName, photoURL, authMethod } = req.body;
             try {
-                // Check if a user with the email already exist
-                const existingUser = await userCollection.findOne({ email })
+                const existingUser = await userCollection.findOne({ email });
 
                 if (existingUser) {
-                    // Update the user with the new authMethod
                     if (existingUser.authMethod !== authMethod) {
                         await userCollection.updateOne(
                             { email },
                             { $set: { authMethod, updatedAt: new Date(), lastLogin: new Date() } }
-                        )
+                        );
                     }
-
-                    return res.status(200).json({
-                        message: "User already exists",
-                        user: existingUser,
-                    });
+                    return res.status(200).json({ message: "User already exists", user: existingUser });
                 }
 
-                // Insert a new user if no duplicate found
-                const newUser = {
-                    email,
-                    displayName,
-                    photoURL,
-                    authMethod,
-                    role: 'member',
-                    createdAt: new Date(),
-                    lastLogin: new Date()
-                }
-
+                const newUser = { email, displayName, photoURL, authMethod, createdAt: new Date(), lastLogin: new Date() };
                 const result = await userCollection.insertOne(newUser);
-                res.status(201).json({
-                    message: "User created successfully",
-                    user: { ...newUser, _id: result.insertedId },
-                })
-            }
-            catch (error) {
-                res.status(500).json({ message: "Error saving user", error: error.message })
-            }
-        });
-
-        // Login User and update login time
-        app.patch("/users/:email", async (req, res) => {
-            const email = req.params.email;
-            try {
-                const result = await userCollection.updateOne(
-                    { email }, // Filter
-                    { $set: { lastLogin: new Date() } } // Update using $set
-                );
-                if (result.matchedCount === 0) {
-                    return res.status(404).json({ message: "User not found" });
-                }
-
-                const user = await userCollection.findOne({ email })
-                res.status(200).json({
-                    message: "User login time updated successfully",
-                    result,
-                    user
-                });
+                res.status(201).json({ message: "User created", user: { ...newUser, _id: result.insertedId } });
             } catch (error) {
-                res.status(500).json({ message: "Error updating user", error: error.message });
+                res.status(500).json({ message: "Error saving user", error: error.message });
             }
         });
 
-        //   Get User's all data from db
+        // Get User's Data
         app.get('/users/:email', async (req, res) => {
             const email = req.params.email;
-            const result = await userCollection.findOne({ email })
+            const result = await userCollection.findOne({ email });
             res.send(result);
-        })
+        });
 
+        // ---------------- Task Related APIs ----------------
 
+        // Add Task
+        app.post("/tasks", async (req, res) => {
+            const task = req.body;
+            if (!task.userEmail) return res.status(400).json({ message: "User email is required" });
+            const result = await taskCollection.insertOne(task);
+            res.send(result);
+        });
 
+        // Get Tasks for a Specific User
+        app.get('/tasks/:email', async (req, res) => {
+            const email = req.params.email;
+            const result = await taskCollection.find({ userEmail: email }).toArray();
+            res.send(result);
+        });
 
+        // Update Task
+        app.patch('/tasks/:id', async (req, res) => {
+            const taskId = req.params.id;
+            const updatedTask = req.body;
+            const result = await taskCollection.updateOne({ _id: new ObjectId(taskId) }, { $set: updatedTask });
+            res.send(result);
+        });
 
+        // Delete Task
+        app.delete('/tasks/:id', async (req, res) => {
+            const taskId = req.params.id;
+            const result = await taskCollection.deleteOne({ _id: new ObjectId(taskId) });
+            res.send(result);
+        });
 
-
-
-        console.log("Successfully connected to MongoDB!");
-    } finally {
-        // Ensures that the client will close when you finish/error
-        // await client.close();
+    } catch (error) {
+        console.error("Error: ", error);
     }
 }
 run().catch(console.dir);
 
-
-
-
-
-
-app.get('/', (req, res) => {
-    res.send("Hello from TaskMaster Backend...")
-})
-
-app.listen(port, () => {
-    console.log('Server is running on port : ', port)
-})
+app.get('/', (req, res) => res.send("TaskMaster Backend Running..."));
+server.listen(port, () => console.log('Server running on port:', port));
